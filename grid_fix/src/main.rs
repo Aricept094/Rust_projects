@@ -1,105 +1,96 @@
 use std::error::Error;
-use std::fs::File;
-use std::path::Path;
-use csv::{ReaderBuilder, Writer};
-use serde::{Deserialize, Serialize};
-use std::f64::consts::PI;
-
-#[derive(Debug, Serialize)]
-struct AnalysisPoint {
-    meridian: f64,
-    radius: f64,
-    keratometry: f64,
-    x: f64,
-    y: f64,
-}
-
-fn calculate_coordinates(meridian_degrees: f64, radius: f64) -> (f64, f64) {
-    let meridian_rad = meridian_degrees * PI / 180.0;
-    let x = (radius * meridian_rad.cos() * 1000.0).round() / 1000.0;  // Round to 3 decimal places
-    let y = (radius * meridian_rad.sin() * 1000.0).round() / 1000.0;
-    (x, y)
-}
+use csv::{ReaderBuilder, WriterBuilder};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // File paths
-    let input_path = Path::new("/home/aricept094/mydata/testrm.csv");
-    let output_path = Path::new("/home/aricept094/mydata/analysis_format.csv");
+    // Path to your original 32x256 CSV data (no headers).
+    let input_file_path = "/home/aricept094/mydata/testrm.csv";
+    
+    // Path to the output CSV file.
+    let output_file_path = "/home/aricept094/mydata/testrm_converted.csv";
 
-    // Read input CSV
-    let mut reader = ReaderBuilder::new()
+    // Set the known dimensions of your dataset
+    let num_meridians = 32;
+    let num_radials = 256;
+
+    // 1. Create a CSV reader, specifying that there are no headers in the file.
+    let mut rdr = ReaderBuilder::new()
         .has_headers(false)
-        .from_path(input_path)?;
+        .from_path(input_file_path)?;
 
-    // Initialize vectors to store data
-    let mut grid_data: Vec<Vec<f64>> = Vec::new();
-    
-    // Read CSV into grid
-    for result in reader.records() {
+    // 2. Create a CSV writer to output our transformed data.
+    let mut wtr = WriterBuilder::new()
+        .has_headers(false) // We'll manually write the header
+        .from_path(output_file_path)?;
+
+    // 3. Write the header row we want in the output CSV, including Keratometry_Value.
+    wtr.write_record(&[
+        "Meridian_Index",
+        "Radial_Index",
+        "Meridian_Angle_Deg",
+        "Meridian_Angle_Rad",
+        "Normalized_Radius",
+        "Cos_Theta",
+        "Sin_Theta",
+        "X_Coordinate",
+        "Y_Coordinate",
+        "Keratometry_Value",  // New column
+    ])?;
+
+    // We'll iterate over the rows, each row corresponds to one radial index.
+    // `radial_index_1_based` will go from 1..=256
+    let mut radial_index_1_based = 0;
+
+    for result in rdr.records() {
+        radial_index_1_based += 1;
+
+        // Parse the current row (32 columns)
         let record = result?;
-        let row: Vec<f64> = record.iter()
-            .map(|field| field.parse::<f64>().unwrap_or(0.0))
-            .collect();
-        grid_data.push(row);
-    }
 
-    // Create writer for output CSV
-    let mut writer = Writer::from_path(output_path)?;
-    
-    // Write header
-    writer.write_record(&["Meridian", "Radius", "Keratometry", "X", "Y"])?;
+        // Each column in the row corresponds to a meridian index from 1..=32
+        for (meridian_index, value_str) in record.iter().enumerate() {
+            // Parse the keratometry reading as a float
+            let k_reading: f64 = value_str.parse()?;
 
-    // Generate meridians (32 points from 0 to 360 degrees)
-    let meridians: Vec<f64> = (0..32)
-        .map(|i| (i as f64 * 11.25))  // Exact 11.25° steps
-        .collect();
-
-    // Generate radial distances (256 points from 0 to 1)
-    let radial_distances: Vec<f64> = (0..256)
-        .map(|i| (i as f64 / 255.0).round() * 1000.0 / 1000.0)  // Ensure precise division
-        .collect();
-
-    // Transform data
-    for (j, &radius) in radial_distances.iter().enumerate() {
-        for (i, &meridian) in meridians.iter().enumerate() {
-            // Get keratometry value from grid
-            let keratometry = grid_data[j][i];
-
-            // Calculate precise X and Y coordinates
-            let (x, y) = calculate_coordinates(meridian, radius);
-
-            // Create analysis point
-            let point = AnalysisPoint {
-                meridian,
-                radius,
-                keratometry,
-                x,
-                y,
-            };
-
-            // Write point to CSV with proper formatting
-            writer.write_record(&[
-                format!("{:.2}", point.meridian),
-                format!("{:.6}", point.radius),
-                format!("{:.8}", point.keratometry),
-                format!("{:.6}", point.x),
-                format!("{:.6}", point.y),
+            let meridian_index_1_based = meridian_index + 1;
+            
+            // Compute Meridian_Angle_Deg (0..360)
+            let meridian_angle_deg = (meridian_index_1_based as f64 - 1.0)
+                * (360.0 / num_meridians as f64);
+            
+            // Convert degrees to radians
+            let meridian_angle_rad = meridian_angle_deg.to_radians();
+            
+            // Compute normalized radius in [0, 1].
+            let normalized_radius = (radial_index_1_based as f64 - 1.0)
+                / (num_radials as f64 - 1.0);
+            
+            // Compute cos and sin for the angle
+            let cos_theta = meridian_angle_rad.cos();
+            let sin_theta = meridian_angle_rad.sin();
+            
+            // Compute Cartesian coordinates
+            let x_coordinate = normalized_radius * cos_theta;
+            let y_coordinate = normalized_radius * sin_theta;
+            
+            // Write the transformed record to the output CSV, including keratometry
+            wtr.write_record(&[
+                meridian_index_1_based.to_string(),
+                radial_index_1_based.to_string(),
+                meridian_angle_deg.to_string(),
+                meridian_angle_rad.to_string(),
+                normalized_radius.to_string(),
+                cos_theta.to_string(),
+                sin_theta.to_string(),
+                x_coordinate.to_string(),
+                y_coordinate.to_string(),
+                k_reading.to_string(),  // New column
             ])?;
         }
     }
 
-    // Verify first few points
-    println!("Verification of first few points:");
-    println!("Meridian\tRadius\tX\tY");
-    for &meridian in meridians.iter().take(5) {
-        let (x, y) = calculate_coordinates(meridian, radial_distances[1]);  // Check second radius
-        println!("{:.2}\t{:.6}\t{:.6}\t{:.6}", 
-                meridian, 
-                radial_distances[1], 
-                x, 
-                y);
-    }
+    // 4. Flush the writer to make sure all data is written to disk.
+    wtr.flush()?;
 
-    println!("\nTransformation complete! Output saved to: {:?}", output_path);
+    println!("Data successfully converted (with Keratometry_Value) and saved to {}", output_file_path);
     Ok(())
 }
