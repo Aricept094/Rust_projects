@@ -5,8 +5,8 @@ use walkdir::WalkDir;
 
 fn main() -> io::Result<()> {
     // Use the exact directories specified with corrected path
-    let source_dir = r#"/mnt/c/Work/casia - Copy/raw data/casia2-4"#;
-    let dest_dir = "/home/aricept094/mydata/casia2-4";  // Corrected username
+    let source_dir = r#"/mnt/c/Work/casia - Copy/raw data/casia_less_than_1"#;
+    let dest_dir = "/home/aricept094/mydata/casia_less_than_1";  // Corrected username
 
     println!("Checking source directory...");
     match fs::read_dir(&source_dir) {

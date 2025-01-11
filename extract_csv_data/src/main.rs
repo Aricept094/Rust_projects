@@ -135,8 +135,8 @@ fn process_csv_file(input_path: &Path, output_dir: &Path) -> Result<(), Processi
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let input_dir = PathBuf::from("/home/aricept094/mydata/casia2-4");
-    let output_dir = PathBuf::from("/home/aricept094/mydata/casia2-4/conv");
+    let input_dir = PathBuf::from("/home/aricept094/mydata/sheets");
+    let output_dir = PathBuf::from("/home/aricept094/mydata/sheets/conv");
     
     println!("Input directory: {}", input_dir.display());
     println!("Output directory: {}", output_dir.display());
