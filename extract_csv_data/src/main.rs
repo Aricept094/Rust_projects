@@ -1,7 +1,7 @@
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Read, BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use csv::{Reader, Writer};
+use csv::{Reader, Writer, ReaderBuilder};
 
 const MARKER: &str = "[Axial Keratometric]";
 const ROWS_TO_SKIP: usize = 3;
@@ -29,42 +29,36 @@ impl From<csv::Error> for ProcessingError {
     }
 }
 
-fn find_marker_position(reader: &mut Reader<File>) -> Option<usize> {
-    for (index, result) in reader.records().enumerate() {
-        if let Ok(record) = result {
-            if let Some(first_cell) = record.get(0) {
-                if first_cell.contains(MARKER) {
-                    return Some(index);
-                }
+fn find_marker_position(file_path: &Path) -> Result<usize, ProcessingError> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+    
+    for (index, line) in reader.lines().enumerate() {
+        if let Ok(line) = line {
+            if line.contains(MARKER) {
+                println!("Found marker '{}' at line {} with content: {}", MARKER, index + 1, line);
+                return Ok(index);
             }
         }
     }
-    None
+    
+    Err(ProcessingError {
+        message: format!("Marker '{}' not found in file", MARKER),
+    })
 }
 
 fn process_csv_file(input_path: &Path, output_dir: &Path) -> Result<(), ProcessingError> {
-    println!("Processing file: {}", input_path.display());
+    println!("\nProcessing file: {}", input_path.display());
     println!("Output directory: {}", output_dir.display());
 
-    // Create reader
-    let file = File::open(input_path)?;
-    let mut reader = csv::Reader::from_reader(file);
-
     // Find marker position
-    let marker_pos = find_marker_position(&mut reader)
-        .ok_or_else(|| ProcessingError {
-            message: format!("Marker '{}' not found in file", MARKER),
-        })?;
+    let marker_pos = find_marker_position(input_path)?;
+    println!("Found marker at line: {}", marker_pos + 1);
 
-    // Print selection range for debugging
-    println!("Found marker at row: {}", marker_pos + 1);
-    println!("Selection starts at row: {}", marker_pos + ROWS_TO_SKIP + 1);
-    println!("Selection ends at row: {}", marker_pos + ROWS_TO_SKIP + ROWS_TO_KEEP);
-    println!("Selecting columns: 1 to {}", COLS_TO_KEEP);
-
-    // Reopen the file to read from the beginning
-    let file = File::open(input_path)?;
-    let mut reader = csv::Reader::from_reader(file);
+    // Calculate positions
+    let start_row = marker_pos + ROWS_TO_SKIP;
+    let end_row = start_row + ROWS_TO_KEEP;
+    println!("Selection range: rows {}-{}", start_row + 1, end_row);
 
     // Prepare output file
     let output_path = output_dir.join(
@@ -77,68 +71,104 @@ fn process_csv_file(input_path: &Path, output_dir: &Path) -> Result<(), Processi
     let output_file = File::create(&output_path)?;
     let mut writer = Writer::from_writer(output_file);
 
-    // Skip rows until the target section
-    let start_row = marker_pos + ROWS_TO_SKIP;
-    let mut records = reader.records();
-    for _ in 0..start_row {
-        records.next();
-    }
+    // Read and process only the required rows
+    let file = File::open(input_path)?;
+    let mut reader = ReaderBuilder::new()
+        .flexible(true)
+        .has_headers(false)
+        .from_reader(file);
 
-    // Process the target section
+    let mut current_row = 0;
     let mut rows_written = 0;
-    for _ in 0..ROWS_TO_KEEP {
-        if let Some(Ok(record)) = records.next() {
+    
+    for result in reader.records() {
+        let record = result?;
+        
+        // Stop after we've processed all needed rows
+        if current_row >= end_row {
+            break;
+        }
+        
+        // Process rows in our target range
+        if current_row >= start_row && current_row < end_row {
+            if record.len() < COLS_TO_KEEP {
+                println!("Warning: Row {} has only {} columns (expected {})", 
+                    current_row + 1, record.len(), COLS_TO_KEEP);
+                continue;
+            }
+            
             let selected_cols: Vec<String> = record
                 .iter()
                 .take(COLS_TO_KEEP)
                 .map(|s| s.to_string())
                 .collect();
+            
+            // Debug print first and last few rows
+            if rows_written < 3 || rows_written >= ROWS_TO_KEEP - 3 {
+                println!("Writing row {}: First value = {}, Last value = {}", 
+                    current_row + 1,
+                    selected_cols.first().unwrap_or(&String::from("N/A")),
+                    selected_cols.last().unwrap_or(&String::from("N/A")));
+            }
+            
             writer.write_record(&selected_cols)?;
             rows_written += 1;
         }
+        
+        current_row += 1;
     }
 
-    println!("Wrote {} rows to {}", rows_written, output_path.display());
+    println!("Rows written to output: {}", rows_written);
+    
+    if rows_written == 0 {
+        return Err(ProcessingError {
+            message: format!("No rows were written to the output file! Check selection range.")
+        });
+    }
+
+    if rows_written != ROWS_TO_KEEP {
+        println!("Warning: Expected to write {} rows but wrote {}", ROWS_TO_KEEP, rows_written);
+    }
+
     writer.flush()?;
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let input_dir = PathBuf::from("/home/aricept094/mydata/sheets");
-    let output_dir = PathBuf::from("/home/aricept094/mydata/sheets/conv");
+    let input_dir = PathBuf::from("/home/aricept094/mydata/casia2-4");
+    let output_dir = PathBuf::from("/home/aricept094/mydata/casia2-4/conv");
     
-    println!("Looking for CSV files in: {}", input_dir.display());
-    println!("Creating output directory: {}", output_dir.display());
+    println!("Input directory: {}", input_dir.display());
+    println!("Output directory: {}", output_dir.display());
     
-    match fs::create_dir_all(&output_dir) {
-        Ok(_) => println!("Output directory created/verified successfully"),
-        Err(e) => println!("Error creating output directory: {}", e),
-    };
+    fs::create_dir_all(&output_dir)?;
+    println!("Output directory created/verified successfully");
 
     let mut processed_files = 0;
+    let mut failed_files = 0;
     
-    // Process all CSV files in the input directory
     for entry in fs::read_dir(input_dir)? {
         let entry = entry?;
         let path = entry.path();
         
         if path.extension().and_then(|s| s.to_str()) == Some("csv") {
-            println!("\nFound CSV file: {}", path.display());
+            println!("\n=== Processing file: {} ===", path.display());
             match process_csv_file(&path, &output_dir) {
                 Ok(_) => {
                     println!("Successfully processed: {}", path.display());
                     processed_files += 1;
                 },
-                Err(e) => eprintln!("Error processing {}: {}", path.display(), e.message),
+                Err(e) => {
+                    eprintln!("Error processing {}: {}", path.display(), e.message);
+                    failed_files += 1;
+                }
             }
         }
     }
 
-    if processed_files == 0 {
-        println!("No CSV files were processed!");
-    } else {
-        println!("\nSuccessfully processed {} CSV files", processed_files);
-    }
+    println!("\nProcessing summary:");
+    println!("Successfully processed: {} files", processed_files);
+    println!("Failed to process: {} files", failed_files);
 
     Ok(())
 }
