@@ -2,55 +2,106 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
+use std::sync::Mutex;
 use csv::{ReaderBuilder, WriterBuilder};
+use rayon::prelude::*;
 
-#[derive(Clone)]  // Add Clone derive
+#[derive(Clone)]
 struct Stats {
     mean: f64,
     std_dev: f64,
 }
 
-fn calculate_stats(values: &[f64]) -> Stats {
-    let sum: f64 = values.iter().sum();
+fn calculate_stats(values: &[f64]) -> Result<Stats, Box<dyn Error + Send + Sync>> {
+    if values.is_empty() {
+        return Ok(Stats { mean: 0.0, std_dev: 0.0 });
+    }
+
+    // Check for NaN values
+    if values.iter().any(|x| x.is_nan()) {
+        return Err("Dataset contains NaN values".into());
+    }
+
     let count = values.len() as f64;
-    let mean = sum / count;
     
-    let variance: f64 = if values.len() > 1 {
+    // First pass - calculate mean with better numerical stability
+    let mean = values.iter()
+        .fold(0.0, |acc, &x| acc + x / count);
+
+    // Check for infinite mean
+    if !mean.is_finite() {
+        return Err("Mean calculation resulted in non-finite value".into());
+    }
+
+    // Second pass - calculate variance with better numerical stability
+    let variance = if values.len() > 1 {
         values.iter()
-            .map(|x| (*x - mean).powi(2))
-            .sum::<f64>() / (count - 1.0)
+            .fold(0.0, |acc, &x| {
+                let diff = x - mean;
+                acc + (diff * diff) / (count - 1.0)
+            })
     } else {
         0.0
     };
+
+    // Check for invalid variance
+    if !variance.is_finite() || variance < 0.0 {
+        return Err("Variance calculation resulted in invalid value".into());
+    }
+
     let std_dev = variance.sqrt();
-    
-    Stats { mean, std_dev }
+
+    Ok(Stats { mean, std_dev })
 }
 
-fn read_parameter_file(file_path: &Path) -> Result<Vec<f64>, Box<dyn Error>> {
+fn read_parameter_file(file_path: &Path) -> Result<Vec<f64>, Box<dyn Error + Send + Sync>> {
     let mut values = Vec::new();
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
         .from_path(file_path)?;
-    
+
     for result in rdr.records() {
         let record = result?;
         for value_str in record.iter() {
             let value: f64 = value_str.parse()?;
+            if !value.is_finite() {
+                return Err("File contains non-finite values".into());
+            }
             values.push(value);
         }
     }
     Ok(values)
 }
 
+fn scale_value(value: f64, stats: &Stats) -> f64 {
+    const MAX_ALLOWED_Z_SCORE: f64 = 10.0;
+
+    if !value.is_finite() || !stats.mean.is_finite() || !stats.std_dev.is_finite() {
+        return 0.0;
+    }
+
+    if stats.std_dev <= 0.0 {
+        return 0.0;
+    }
+
+    let scaled = (value - stats.mean) / stats.std_dev;
+
+    // Clamp extreme values
+    if scaled.abs() > MAX_ALLOWED_Z_SCORE {
+        scaled.signum() * MAX_ALLOWED_Z_SCORE
+    } else {
+        scaled
+    }
+}
+
 fn process_patient_data(
     base_dir: &Path,
     patient_id: &str,
     output_dir: &Path
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let num_meridians = 256;
     let num_radials = 32;
-    
+
     let mut stats_map = HashMap::new();
     let mut parameters = vec![
         ("Axial_Anterior", Vec::new()),
@@ -61,7 +112,7 @@ fn process_patient_data(
         ("Height_Posterior", Vec::new()),
         ("Pachymetry", Vec::new()),
     ];
-    
+
     // Read data and calculate stats for each parameter
     for (param_name, param_data) in parameters.iter_mut() {
         let folder_name = param_name.replace("_", " ");
@@ -72,20 +123,20 @@ fn process_patient_data(
         println!("Reading file: {:?}", file_path);
         
         *param_data = read_parameter_file(&file_path)?;
-        let stats = calculate_stats(param_data);
-        let stats_clone = stats.clone();  // Clone stats before moving
+        let stats = calculate_stats(param_data)?;
+        let stats_clone = stats.clone();
         stats_map.insert(param_name.to_string(), stats);
         
         println!("Stats for {}: Mean = {:.6}, StdDev = {:.6}", 
                 param_name, stats_clone.mean, stats_clone.std_dev);
     }
-    
+
     // Create output file
     let output_path = output_dir.join(format!("{}_combined.csv", patient_id));
-    let mut wtr = WriterBuilder::new()
+    let wtr = Mutex::new(WriterBuilder::new()
         .has_headers(true)
-        .from_path(&output_path)?;
-    
+        .from_path(&output_path)?);
+
     // Write header
     let mut header = vec![
         "Meridian_Index".to_string(),
@@ -98,27 +149,33 @@ fn process_patient_data(
         "X_Coordinate".to_string(),
         "Y_Coordinate".to_string(),
     ];
-    
+
     // Add parameter columns to header
     for (param_name, _) in &parameters {
         header.push(format!("{}_Value", param_name));
         header.push(format!("{}_Scaled", param_name));
     }
-    
-    wtr.write_record(&header)?;
-    
-    // Write data rows
-    for meridian in 0..num_meridians {
-        let meridian_index_1_based = meridian + 1;
+
+    wtr.lock().unwrap().write_record(&header)?;
+
+    // Clone the data structures needed in the parallel section
+    let parameters = parameters.clone();
+    let stats_map = stats_map.clone();
+
+    // Generate and collect all rows
+    let rows: Vec<_> = (0..num_meridians).into_par_iter().flat_map(move |meridian| {
+        let parameters = parameters.clone();
+        let stats_map = stats_map.clone();
         
-        for radial_index in 0..num_radials {
+        (0..num_radials).into_par_iter().map(move |radial_index| {
             let radial_index_1_based = radial_index + 1;
+            let meridian_index_1_based = meridian + 1;
             let data_index = meridian * num_radials + radial_index;
             
-            let meridian_angle_deg = (meridian_index_1_based as f64 - 1.0)
+            let meridian_angle_deg = (meridian_index_1_based as f64 - 1.0) 
                 * (360.0 / num_meridians as f64);
             let meridian_angle_rad = meridian_angle_deg.to_radians();
-            let normalized_radius = (radial_index_1_based as f64 - 1.0)
+            let normalized_radius = (radial_index_1_based as f64 - 1.0) 
                 / (num_radials as f64 - 1.0);
             
             let cos_theta = meridian_angle_rad.cos();
@@ -139,42 +196,41 @@ fn process_patient_data(
                 y_coordinate.to_string(),
             ];
             
-            // Add values and scaled values for each parameter
             for (param_name, param_data) in &parameters {
                 let value = param_data[data_index];
                 let stats = stats_map.get(*param_name).unwrap();
-                let scaled = if stats.std_dev != 0.0 {
-                    (value - stats.mean) / stats.std_dev
-                } else {
-                    0.0
-                };
+                let scaled = scale_value(value, stats);
                 
                 row.push(value.to_string());
                 row.push(scaled.to_string());
             }
             
-            wtr.write_record(&row)?;
-        }
+            row
+        }).collect::<Vec<_>>()
+    }).collect();
+
+    // Write all rows
+    for row in rows {
+        wtr.lock().unwrap().write_record(&row)?;
     }
-    
-    wtr.flush()?;
+
     println!("Created combined file: {:?}", output_path);
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let base_dir = Path::new("/home/aricept094/mydata/casia2-4/processed_data");
     let output_dir = Path::new("/home/aricept094/mydata/casia2-4/combined_data");
-    
+
     println!("Creating output directory: {:?}", output_dir);
     fs::create_dir_all(output_dir)?;
-    
+
     // Get list of patient IDs from Elevation Anterior folder
     let sample_dir = base_dir.join("Elevation Anterior");
     let mut patient_ids = Vec::new();
-    
+
     println!("Scanning directory: {:?}", sample_dir);
-    
+
     for entry in fs::read_dir(sample_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -191,16 +247,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-    
+
     println!("Found {} patients to process", patient_ids.len());
-    
+
     // Process each patient
-    for (i, patient_id) in patient_ids.iter().enumerate() {
+    patient_ids.par_iter().enumerate().try_for_each(|(i, patient_id)| {
         println!("\nProcessing patient {}/{}: {}", 
                 i + 1, patient_ids.len(), patient_id);
-        process_patient_data(base_dir, patient_id, output_dir)?;
-    }
-    
+        process_patient_data(base_dir, patient_id, output_dir)
+    })?;
+
     println!("\nAll patients processed successfully!");
     Ok(())
 }
