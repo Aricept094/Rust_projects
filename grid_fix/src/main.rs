@@ -133,8 +133,8 @@ fn process_csv_file(input_path: &Path, output_path: &Path) -> Result<(), Box<dyn
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let input_dir = Path::new("/home/aricept094/mydata/sheets/conv");
-    let output_dir = Path::new("/home/aricept094/mydata/sheets/conv/transformed");
+    let input_dir = Path::new("/home/aricept094/mydata/sheets/conv_Pachymetry");
+    let output_dir = Path::new("/home/aricept094/mydata/sheets/conv_Elevation_Posterior/transformed");
     
     // Create output directory if it doesn't exist
     fs::create_dir_all(output_dir)?;
