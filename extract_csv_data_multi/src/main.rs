@@ -12,6 +12,7 @@ static MARKERS_AND_SKIPS: &[(&str, usize)] = &[
     ("[Axial Anterior]", 3),
     ("[Height Anterior]", 3),
     ("[Height Posterior]", 3),
+    ("[Axial Keratometric]", 3),
     ("[Elevation Anterior]", 11),
     ("[Elevation Posterior]", 11),
 ];
@@ -25,6 +26,7 @@ static DIRECTORIES: &[&str] = &[
     "/home/aricept094/mydata/casia_less_than_1",
     "/home/aricept094/mydata/casia1-2",
     "/home/aricept094/mydata/casia2-4",
+    "/home/aricept094/mydata/sheets",
 ];
 
 // ----------------- Error Handling -----------------

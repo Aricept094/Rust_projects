@@ -74,8 +74,8 @@ fn read_parameter_file(file_path: &Path) -> Result<Vec<f64>, Box<dyn Error + Sen
 }
 
 fn scale_value(value: f64, stats: &Stats) -> f64 {
-    const MAX_ALLOWED_Z_SCORE: f64 = 10.0;
-
+    // Standard scaling: (x - mean) / std_dev
+    // Return 0.0 for edge cases to maintain stability
     if !value.is_finite() || !stats.mean.is_finite() || !stats.std_dev.is_finite() {
         return 0.0;
     }
@@ -84,15 +84,9 @@ fn scale_value(value: f64, stats: &Stats) -> f64 {
         return 0.0;
     }
 
-    let scaled = (value - stats.mean) / stats.std_dev;
-
-    // Clamp extreme values
-    if scaled.abs() > MAX_ALLOWED_Z_SCORE {
-        scaled.signum() * MAX_ALLOWED_Z_SCORE
-    } else {
-        scaled
-    }
+    (value - stats.mean) / stats.std_dev
 }
+
 
 fn process_patient_data(
     base_dir: &Path,
@@ -108,6 +102,7 @@ fn process_patient_data(
         ("Axial_Posterior", Vec::new()),
         ("Elevation_Anterior", Vec::new()),
         ("Elevation_Posterior", Vec::new()),
+        ("Axial_Keratometric", Vec::new()),
         ("Height_Anterior", Vec::new()),
         ("Height_Posterior", Vec::new()),
         ("Pachymetry", Vec::new()),
@@ -219,8 +214,8 @@ fn process_patient_data(
 }
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let base_dir = Path::new("/home/aricept094/mydata/casia2-4/processed_data");
-    let output_dir = Path::new("/home/aricept094/mydata/casia2-4/combined_data");
+    let base_dir = Path::new("/home/aricept094/mydata/sheets/processed_data");
+    let output_dir = Path::new("/home/aricept094/mydata/sheets/combined_data");
 
     println!("Creating output directory: {:?}", output_dir);
     fs::create_dir_all(output_dir)?;
