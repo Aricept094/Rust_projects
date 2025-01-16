@@ -1,4 +1,5 @@
 use csv::Reader;
+use rayon::prelude::*;
 use serde::Deserialize;
 use statrs::statistics::{Data, Distribution, OrderStatistics};
 use std::error::Error;
@@ -21,14 +22,14 @@ struct Record {
 
 fn calculate_statistics(data: &[f64]) -> Result<Statistics, Box<dyn Error>> {
     let mut sorted_data = data.to_vec();
-    sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    
+    sorted_data.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+
     let mut data_stats = Data::new(data.to_vec());
-    
+
     // Calculate quartiles
     let q1_idx = (data.len() as f64 * 0.25).floor() as usize;
     let q3_idx = (data.len() as f64 * 0.75).floor() as usize;
-    
+
     Ok(Statistics {
         mean: data_stats.mean().unwrap(),
         median: data_stats.median(),
@@ -42,7 +43,6 @@ fn calculate_statistics(data: &[f64]) -> Result<Statistics, Box<dyn Error>> {
         kurtosis: calculate_kurtosis(data),
     })
 }
-
 
 #[derive(Debug)]
 struct Statistics {
@@ -63,48 +63,36 @@ struct Range {
 
 fn calculate_skewness(data: &[f64]) -> f64 {
     let n = data.len() as f64;
-    let mean = data.iter().sum::<f64>() / n;
-    let variance = data.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / n;
+    let mean = data.par_iter().sum::<f64>() / n;
+    let variance = data.par_iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
     let std_dev = variance.sqrt();
-    
-    data.iter()
-        .map(|x| ((x - mean) / std_dev).powi(3))
-        .sum::<f64>() / n
+
+    data.par_iter().map(|x| ((x - mean) / std_dev).powi(3)).sum::<f64>() / n
 }
 
 fn calculate_kurtosis(data: &[f64]) -> f64 {
     let n = data.len() as f64;
-    let mean = data.iter().sum::<f64>() / n;
-    let variance = data.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / n;
+    let mean = data.par_iter().sum::<f64>() / n;
+    let variance = data.par_iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
     let std_dev = variance.sqrt();
-    
-    (data.iter()
-        .map(|x| ((x - mean) / std_dev).powi(4))
-        .sum::<f64>() / n) - 3.0  // Excess kurtosis
+
+    (data.par_iter().map(|x| ((x - mean) / std_dev).powi(4)).sum::<f64>() / n) - 3.0 // Excess kurtosis
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let file_path = "/home/aricept094/python/fourier_analysis_1d_meridian_results('Meridian_Angle_Rad')['Elevation_Anterior_Scaled']_all_patinets.csv";
     let file = File::open(file_path)?;
     let mut rdr = Reader::from_reader(file);
-    
-    let mut records: Vec<Record> = Vec::new();
-    for result in rdr.deserialize() {
-        let record: Record = result?;
-        records.push(record);
-    }
-    
+
+    let records: Vec<Record> = rdr.deserialize().par_bridge().collect::<Result<_, _>>()?;
+
     // Extract individual coefficients into separate vectors
     let coef_names = vec![
         "coef_a0", "coef_am1", "coef_bm1", "coef_am2", "coef_bm2",
         "coef_am3", "coef_bm3", "coef_am4", "coef_bm4", "coef_am5", "coef_bm5"
     ];
-    
-    for (i, coef_name) in coef_names.iter().enumerate() {
+
+    let stats: Vec<_> = coef_names.par_iter().enumerate().map(|(i, coef_name)| {
         let data: Vec<f64> = match i {
             0 => records.iter().map(|r| r.coef_a0).collect(),
             1 => records.iter().map(|r| r.coef_am1).collect(),
@@ -119,8 +107,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             10 => records.iter().map(|r| r.coef_bm5).collect(),
             _ => unreachable!(),
         };
-        
-        let stats = calculate_statistics(&data)?;
+
+        let stats = calculate_statistics(&data).unwrap();
+        (coef_name, stats)
+    }).collect();
+    
+    for (coef_name, stats) in stats {
         println!("\nStatistics for {}:", coef_name);
         println!("Mean: {:.4}", stats.mean);
         println!("Median: {:.4}", stats.median);
@@ -130,6 +122,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Skewness: {:.4}", stats.skewness);
         println!("Kurtosis: {:.4}", stats.kurtosis);
     }
-    
+
     Ok(())
 }
