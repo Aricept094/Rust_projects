@@ -148,6 +148,7 @@ fn process_patient_data(
         "Sin_Theta".to_string(),
         "X_Coordinate".to_string(),
         "Y_Coordinate".to_string(),
+        "Alpha_Angle".to_string(), // Add new column for alpha_angle
     ];
 
     for (param_name, _) in &parameters {
@@ -183,6 +184,29 @@ fn process_patient_data(
             let x_coordinate = transformed_radius * cos_theta;
             let y_coordinate = transformed_radius * sin_theta;
             
+            // Calculate alpha_angle
+            let pachymetry = parameters.iter()
+                .find(|(name, _)| *name == "Pachymetry")
+                .map(|(_, data)| data[data_index])
+                .unwrap_or(0.0);
+
+            let height_posterior = parameters.iter()
+                .find(|(name, _)| *name == "Height_Posterior")
+                .map(|(_, data)| data[data_index])
+                .unwrap_or(0.0);
+
+            let height_anterior = parameters.iter()
+                .find(|(name, _)| *name == "Height_Anterior")
+                .map(|(_, data)| data[data_index])
+                .unwrap_or(0.0);
+
+            let height_diff = height_posterior - height_anterior;
+            let alpha_angle = if height_diff != 0.0 {
+                pachymetry / height_diff
+            } else {
+                f64::NAN // Handle division by zero
+            };
+            
             let mut row = vec![
                 meridian_index_1_based.to_string(),
                 radial_index_1_based.to_string(),
@@ -194,6 +218,7 @@ fn process_patient_data(
                 sin_theta.to_string(),
                 x_coordinate.to_string(),
                 y_coordinate.to_string(),
+                alpha_angle.to_string(), // Add alpha_angle to the output
             ];
             
             for (param_name, param_data) in &parameters {
@@ -216,6 +241,7 @@ fn process_patient_data(
     println!("Created combined file: {:?}", output_path);
     Ok(())
 }
+
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let base_dir = Path::new("/home/aricept094/mydata/casia_less_than_1/processed_data");
