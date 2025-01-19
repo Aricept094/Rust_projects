@@ -244,8 +244,8 @@ fn process_patient_data(
 
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let base_dir = Path::new("/home/aricept094/mydata/casia_less_than_1/processed_data");
-    let output_dir = Path::new("/home/aricept094/mydata/casia_less_than_1/combined_data");
+    let base_dir = Path::new("/home/aricept094/mydata/sheets/processed_data");
+    let output_dir = Path::new("/home/aricept094/mydata/sheets/combined_data");
 
     println!("Creating output directory: {:?}", output_dir);
     fs::create_dir_all(output_dir)?;
