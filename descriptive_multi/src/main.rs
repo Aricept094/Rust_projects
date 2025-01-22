@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use glob::glob;
+use rayon::prelude::*;
 
 #[derive(Debug, Deserialize)]
 struct Record {
@@ -78,56 +79,44 @@ fn analyze_file(file_path: &Path) -> Result<Vec<(String, Statistics)>, Box<dyn E
 
 fn format_statistics(stat: &Statistics) -> String {
     // Using Unicode escape sequence for ± symbol
-    format!("{:.4} \u{00B1} {:.4} [{:.4} - {:.4}]", 
-        stat.mean, 
-        stat.std_dev, 
-        stat.range.min, 
-        stat.range.max
+    format!("{:.4} \u{00B1} {:.4} [{:.4} - {:.4}]",
+            stat.mean,
+            stat.std_dev,
+            stat.range.min,
+            stat.range.max
     )
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let dir_path = "/home/aricept094/mydata/sheets/combined_data/radial_results/Height_Anterior_Value";
     let pattern = format!("{}/*.csv", dir_path);
-    
-    // Create file with UTF-8 encoding
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open("analysis_results2.csv")?;
 
-    // Create CSV writer with explicit UTF-8 encoding
-    let mut wtr = WriterBuilder::new()
-        .has_headers(true)
-        .from_writer(vec![]);  // Write to memory first
 
-    // Write header
-    wtr.write_record(&["Radius", "Column", "Statistics"])?;
+    // Collect paths first to parallelize
+    let paths: Vec<_> = glob(&pattern)?.filter_map(Result::ok).collect();
 
-    // Collect all results first
-    let mut all_results: Vec<(String, String, Statistics)> = Vec::new();
+    // Process each file in parallel using rayon and collect results
+    let results: Vec<Vec<(String, String, Statistics)>> = paths.par_iter()
+        .map(|path| {
+            let file_name = path.file_name().unwrap().to_string_lossy();
+            let radius_label = get_radius_label(&file_name);
+            println!("Processing file: {} ({})", file_name, radius_label);
 
-    // Process each file
-    for entry in glob(&pattern)? {
-        match entry {
-            Ok(path) => {
-                let file_name = path.file_name().unwrap().to_string_lossy();
-                let radius_label = get_radius_label(&file_name);
-                println!("Processing file: {} ({})", file_name, radius_label);
-                
-                match analyze_file(&path) {
-                    Ok(stats) => {
-                        for (column_name, stat) in stats {
-                            all_results.push((radius_label.clone(), column_name, stat));
-                        }
-                    },
-                    Err(e) => eprintln!("Error processing file {}: {}", file_name, e),
-                }
-            },
-            Err(e) => eprintln!("Error accessing file: {}", e),
-        }
-    }
+            match analyze_file(path) {
+                Ok(stats) => {
+                    stats.into_iter().map(|(column_name, stat)| (radius_label.clone(), column_name, stat)).collect()
+                },
+                Err(e) => {
+                    eprintln!("Error processing file {}: {}", file_name, e);
+                    Vec::new() // Return empty Vec in case of error to continue processing other files
+                },
+            }
+        })
+        .collect();
+
+    // Flatten the results from parallel processing
+    let mut all_results: Vec<(String, String, Statistics)> = results.into_iter().flatten().collect();
+
 
     // Sort results
     let radius_order = vec![
@@ -147,8 +136,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Write BOM for UTF-8
-    std::fs::write("analysis_results_Height_Anterior_Value.csv", vec![0xEF, 0xBB, 0xBF])?;
-    
+    std::fs::write("analysis_results_Height_Anterior_Value.csv", [0xEF, 0xBB, 0xBF])?;
+
     // Create final writer
     let mut final_wtr = WriterBuilder::new()
         .has_headers(false)
