@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Define the Radial_Index values we want to separate
-    let radial_indices = vec![1, 4, 8, 12, 16, 24, 28, 32];
+    let radial_indices = vec![1, 4, 8, 12, 16, 20, 24,];
 
     // Input directory
     let input_dir = Path::new("/home/aricept094/mydata/sheets/combined_data/");
