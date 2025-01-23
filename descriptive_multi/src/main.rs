@@ -88,7 +88,7 @@ fn format_statistics(stat: &Statistics) -> String {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let dir_path = "/home/aricept094/mydata/sheets/combined_data/radial_results/Height_Anterior_Value";
+    let dir_path = "/home/aricept094/mydata/sheets/combined_data/radial_results/casia1-2/Height_Posterior_Value";
     let pattern = format!("{}/*.csv", dir_path);
 
 
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Write BOM for UTF-8
-    std::fs::write("analysis_results_Height_Anterior_Value.csv", [0xEF, 0xBB, 0xBF])?;
+    std::fs::write("analysis_results_casia1-2_Height_Posterior_Value.csv", [0xEF, 0xBB, 0xBF])?;
 
     // Create final writer
     let mut final_wtr = WriterBuilder::new()
@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .from_writer(OpenOptions::new()
             .write(true)
             .append(true)
-            .open("analysis_results_Height_Anterior_Value.csv")?);
+            .open("analysis_results_casia1-2_Height_Posterior_Value.csv")?);
 
     // Write headers
     final_wtr.write_record(&["Radius", "Column", "Statistics"])?;

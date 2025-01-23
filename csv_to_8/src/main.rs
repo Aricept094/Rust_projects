@@ -10,10 +10,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let radial_indices = vec![1, 4, 8, 12, 16, 20, 24,];
 
     // Input directory
-    let input_dir = Path::new("/home/aricept094/mydata/sheets/combined_data/");
+    let input_dir = Path::new("/home/aricept094/mydata/casia_less_than_1/combined_data/");
 
     // Base output directory
-    let base_output_dir = Path::new("/home/aricept094/mydata/sheets/combined_data");
+    let base_output_dir = Path::new("/home/aricept094/mydata/casia_less_than_1/combined_data");
 
     // Create output directories for each Radial_Index
     for &index in &radial_indices {
