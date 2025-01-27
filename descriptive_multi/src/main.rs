@@ -88,7 +88,7 @@ fn format_statistics(stat: &Statistics) -> String {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let dir_path = "/home/aricept094/mydata/sheets/combined_data/radial_results/sheets/Elevation_Posterior_Value";
+    let dir_path = "/home/aricept094/mydata/sheets/combined_data/radial_results/casia1-2/Pachymetry_Value";
     let pattern = format!("{}/*.csv", dir_path);
 
 
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Write BOM for UTF-8
-    std::fs::write("analysis_results_sheets_Elevation_Posterior_Value.csv", [0xEF, 0xBB, 0xBF])?;
+    std::fs::write("analysis_results_casia1-2_Pachymetry_Value.csv", [0xEF, 0xBB, 0xBF])?;
 
     // Create final writer
     let mut final_wtr = WriterBuilder::new()
@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .from_writer(OpenOptions::new()
             .write(true)
             .append(true)
-            .open("analysis_results_sheets_Elevation_Posterior_Value.csv")?);
+            .open("analysis_results_casia1-2_Pachymetry_Value.csv")?);
 
     // Write headers
     final_wtr.write_record(&["Radius", "Column", "Statistics"])?;
@@ -160,6 +160,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     final_wtr.flush()?;
-    println!("Analysis complete. Results saved to analysis_results_Elevation_Posterior_Value.csv");
+    println!("Analysis complete. Results saved to analysis_results_Pachymetry_Value.csv");
     Ok(())
 }
